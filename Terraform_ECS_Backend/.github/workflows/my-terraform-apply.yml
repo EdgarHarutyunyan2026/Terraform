@@ -1,0 +1,60 @@
+name: Terraform Release Apply
+
+on:
+  release:
+    types: [edited]
+
+jobs:
+  release-apply:
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        id: docker
+        run: |
+          IMAGE_TAG=backend-image
+          cd backend_image && docker build -t $IMAGE_TAG .
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::877680973630:role/Terraform_ECS_Backent
+          aws-region: eu-central-1
+
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        id: Apply
+        run: terraform apply -auto-approve -var="docker_image=${{ steps.docker.outputs.image_tag }}"
+     
+      - name: Send plan to Telegram (as file)
+        if: steps.Apply.outcome == 'success' 
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          document: backend-plan.txt
+          message: "✅ Terraform Apply was successful for  Backend."
+
+      - name: Send Telegram message
+        if: steps.Apply.outcome != 'success'
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: "❌ Terraform Apply failed for  Backend. Please check the GitHub Actions logs."
+
